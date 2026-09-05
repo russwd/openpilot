@@ -50,12 +50,13 @@ class TorqueParams:
 
 
 @patch(PATCH_PARAMS_OVERRIDE)
-def make_override(mock_params_cls, enforce=False, manual_override=False,
+def make_override(mock_params_cls, enforce=False, custom_tuning=False, manual_override=False,
                   manual_lat_accel_factor='200', manual_friction='15'):
   """Create a LatControlTorqueExtOverride with mocked Params."""
   mock_inst = mock_params_cls.return_value
   mock_inst.get_bool.side_effect = lambda k: {
     'EnforceTorqueControl': enforce,
+    'CustomTorqueParams': custom_tuning,
     'TorqueParamsOverrideEnabled': manual_override,
   }.get(k, False)
   mock_inst.get.side_effect = lambda k, **kw: {
@@ -195,7 +196,7 @@ class TestManualOverridePriority(unittest.TestCase):
   """Manual override must take priority over speed-dep."""
 
   def test_manual_overwrites_speed_dep(self):
-    ovr = make_override(enforce=True, manual_override=True,
+    ovr = make_override(enforce=True, custom_tuning=True, manual_override=True,
                         manual_lat_accel_factor='350', manual_friction='25')
     activate_speed_dep(ovr)
     ovr._last_vego = 15.0
@@ -266,10 +267,60 @@ class TestSpeedDepLimitHandling(unittest.TestCase):
     ovr.update_limits.assert_not_called()
 
   def test_manual_override_still_reports_changed(self):
-    ovr = make_override(enforce=True, manual_override=True)
+    ovr = make_override(enforce=True, custom_tuning=True, manual_override=True)
     tp = TorqueParams()
     # frame = -1, after +1 -> frame=0, 0 % 300 == 0 -> manual fires (upstream path)
     assert ovr.update_override_torque_params(tp) is True
+
+
+class TestCustomTorqueOverrideLifecycle(unittest.TestCase):
+  def test_custom_tuning_applies_at_controller_start_without_realtime(self):
+    ovr = make_override(enforce=True, custom_tuning=True, manual_override=False,
+                        manual_lat_accel_factor='2.5', manual_friction='0.01')
+    tp = TorqueParams()
+
+    assert ovr.update_override_torque_params(tp) is True
+    assert tp.latAccelFactor == 2.5
+    assert tp.friction == 0.01
+
+  def test_custom_tuning_off_does_not_apply_stored_values(self):
+    ovr = make_override(enforce=True, custom_tuning=False, manual_override=True,
+                        manual_lat_accel_factor='2.5', manual_friction='0.01')
+    tp = TorqueParams(latAccelFactor=2.61, friction=0.107)
+
+    assert ovr.update_override_torque_params(tp) is False
+    assert tp.latAccelFactor == 2.61
+    assert tp.friction == 0.107
+
+  def test_realtime_off_does_not_refresh_after_start(self):
+    ovr = make_override(enforce=True, custom_tuning=True, manual_override=False,
+                        manual_lat_accel_factor='2.5', manual_friction='0.01')
+    tp = TorqueParams()
+    assert ovr.update_override_torque_params(tp) is True
+
+    tp.latAccelFactor = 9.0
+    tp.friction = 9.0
+    for _ in range(300):
+      changed = ovr.update_override_torque_params(tp)
+
+    assert changed is False
+    assert tp.latAccelFactor == 9.0
+    assert tp.friction == 9.0
+
+  def test_realtime_on_refreshes_values(self):
+    ovr = make_override(enforce=True, custom_tuning=True, manual_override=True,
+                        manual_lat_accel_factor='2.5', manual_friction='0.01')
+    tp = TorqueParams()
+    assert ovr.update_override_torque_params(tp) is True
+
+    tp.latAccelFactor = 9.0
+    tp.friction = 9.0
+    for _ in range(300):
+      changed = ovr.update_override_torque_params(tp)
+
+    assert changed is True
+    assert tp.latAccelFactor == 2.5
+    assert tp.friction == 0.01
 
 
 class TestLearnerSanityBounds(unittest.TestCase):
