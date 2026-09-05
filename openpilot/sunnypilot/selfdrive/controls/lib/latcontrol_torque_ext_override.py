@@ -15,7 +15,6 @@ class LatControlTorqueExtOverride:
     self.CP = CP
     self.params = Params()
     self.enforce_torque_control_toggle = self.params.get_bool("EnforceTorqueControl")  # only during init
-    self.custom_torque_params = self.params.get_bool("CustomTorqueParams")  # only during init
     self.torque_override_enabled = self.params.get_bool("TorqueParamsOverrideEnabled")
     self.frame = -1
 
@@ -60,15 +59,7 @@ class LatControlTorqueExtOverride:
     if self.frame % 300 == 0:
       self.torque_override_enabled = self.params.get_bool("TorqueParamsOverrideEnabled")
 
-      # Custom tuning is the persistent/offline override: apply it when the
-      # controller starts. Manual Real-Time Tuning only opts into refreshing
-      # those values while controlsd is already running.
-      if self.frame != 0:
-        if not self.torque_override_enabled:
-          return False
-        self.custom_torque_params = self.params.get_bool("CustomTorqueParams")
-
-      if not self.custom_torque_params:
+      if not self.torque_override_enabled:
         return False
 
       torque_params.latAccelFactor = float(self.params.get("TorqueParamsOverrideLatAccelFactor", return_default=True))
